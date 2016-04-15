@@ -1,0 +1,666 @@
+---
+title: "ass2"
+author: "Mina Sedra"
+date: "April 12, 2016"
+output: html_document
+---
+The aim of this markdown is to show the steps and the different concepts of training a predictve model by some examples
+
+So first we will load the data which we will run the examples on 
+the data is sonar data having 2 classes M (Metal) or R (Rock)
+Link to the data :http://archive.ics.uci.edu/ml/datasets/Connectionist+Bench+(Sonar,+Mines+vs.+Rocks)
+
+```{r ,warning=FALSE}
+raw.data <- read.csv(file = '/Users/mina/Desktop/sonar.all-data',header = FALSE)
+Data = raw.data[,1:60]
+output = raw.data[,61]
+```
+So first we will mesure the performance for our classifiers by 4 main readings
+1.accuracy : it is a description of systematic errors
+2.precision : is the fraction of retrieved instances that are relevant
+3.recall : is the fraction of relevant instances that are retrieved
+4.f measure : is a measure of a test's accuracy (also F-score or F-measure)
+
+measure Precision Recall function simply takes the predict vector and the actual labels and calculate the different measures
+
+```{r ,results="hide",warning=FALSE}
+
+measurePrecisionRecall <- function(predict, actual_labels,data){
+  if(data == "sonar"){
+    actual_labels <- gsub("R", 0, actual_labels)
+    actual_labels <- gsub("M", 1, actual_labels)
+    actual_labels <- as.integer(actual_labels)
+    predict <- gsub("R", 0, predict)
+    predict <- gsub("M", 1, predict)
+    predict <- as.integer(predict)
+    }
+else{
+    actual_labels <- gsub(1, 0, actual_labels)
+    actual_labels <- gsub(2, 1, actual_labels)
+    actual_labels <- as.integer(actual_labels)
+    predict <- gsub(1, 0, predict)
+    predict <- gsub(2, 1, predict)
+    predict <- as.integer(predict)
+}
+  accuracy = sum(!is.na(match(predict,actual_labels)))/length(predict)
+  precision <- sum(predict & actual_labels) / sum(predict)
+  recall <- sum(predict & actual_labels) / sum(actual_labels)
+  fmeasure <- 2 * precision * recall / (precision + recall)
+  names <- c("accuracy","precision","recall","fmeasure")
+  values <- c(accuracy,precision,recall,fmeasure)
+  df = data.frame(names, values) 
+
+#   cat('precision:  ')
+#   cat(precision * 100)
+#   cat('%')
+#   cat('\n')
+#   
+#   cat('recall:     ')
+#   cat(recall * 100)
+#   cat('%')
+#   cat('\n')
+#   
+#   cat('f-measure:  ')
+#   cat(fmeasure * 100)
+#   cat('%')
+#   cat('\n')
+#   cat('###########################')
+#     cat('\n')
+  
+  return(df)
+}
+
+```
+Our first classifier is Decision tree C4.5 classifier as it is One of the most popular off the shelf classifiers:
+so will train our model on the whole data set and also try to test the model by predicting also on the whole data
+```{r,warning=FALSE}
+#c4.5 
+library(RWeka)
+m1 <- J48(V61 ~ ., data = raw.data) 
+plot(m1)
+summary(m1)
+prediction.vector_c4.5 <- predict(m1, Data)
+c4.5_table <- table(predicted=prediction.vector_c4.5, correct = output )
+print(measurePrecisionRecall(prediction.vector_c4.5,output,data = "sonar"))
+```
+
+Also C5 Decision tree :
+
+```{r,warning=FALSE}
+#c5 tree
+library("C50", lib.loc="/Library/Frameworks/R.framework/Versions/3.2/Resources/library")
+treeModel <- C5.0(x = Data, y = output)
+plot(treeModel)
+summary(treeModel)
+prediction.vector_c5 <- predict(treeModel, Data)
+c5_table <-table(predicted=prediction.vector_c5, correct = output )
+print(measurePrecisionRecall(prediction.vector_c5,output,data = "sonar"))
+```
+
+as we can see the readings looks very good however its FAKE , simply because we did not test our model on new or unseen data (unseen by the model in the training phase)
+also Training and testing a classifier on the same data leads to over-fitting and false results
+and that is why will use Cross-validation.
+Cross-validation is taking sample from the data then trai with the rest then test the model with the data we excluded from the training phase and then take other sample till we cover the whole dataset
+there is n-fold cross-validation and Leave-one-out cross-validation the n-fold is excluding n samples while Leave-one-out is excluding only one and train on the rest
+we will use 10-folds cross-validation
+
+```{r,warning=FALSE}
+library("caret", lib.loc="/Library/Frameworks/R.framework/Versions/3.2/Resources/library")
+#c4.5 with C.V.
+folds <-createFolds(raw.data$V61, k = 10)
+c4.5_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data[-fold,]
+  testdata <- raw.data[fold,]
+  c4.5_model <- J48(V61 ~ ., data = traindata) 
+  prediction.vector_c4.5 <- predict(c4.5_model, testdata)
+  c4.5_table <- table(predicted=prediction.vector_c4.5, correct = testdata$V61 )
+  score <- measurePrecisionRecall(prediction.vector_c4.5,testdata$V61,data = "sonar")
+  c4.5_models <- rbind(c4.5_models,c(i,score$values))
+  colnames(c4.5_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+}
+print(c4.5_models)
+```
+
+Same for the C5
+
+```{r,warning=FALSE}
+#c5 with C.V.
+folds <-createFolds(raw.data$V61, k = 10)
+c5_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data[-fold,]
+  testdata <- raw.data[fold,]
+  c5_model <- C5.0(x = traindata, y = traindata$V61)
+  prediction.vector_c5 <- predict(c5_model, testdata)
+  c5_table <- table(predicted=prediction.vector_c5, correct = testdata$V61 )
+  score <- measurePrecisionRecall(prediction.vector_c5,testdata$V61,data = "sonar")
+  c5_models <- rbind(c5_models,c(i,score$values))
+  colnames(c5_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+}
+print(c5_models)
+```
+
+trainng SVM model more about SVM (https://en.wikipedia.org/wiki/Support_vector_machine)
+```{r,warning=FALSE}
+library("e1071", lib.loc="/Library/Frameworks/R.framework/Versions/3.2/Resources/library")
+#SVM with C.V.
+folds <-createFolds(raw.data$V61, k = 10)
+svm_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data[-fold,]
+  testdata <- raw.data[fold,]
+  svm_model <- svm(V61 ~ ., data = traindata) 
+  prediction.vector_svm <- predict(svm_model, testdata)
+  svm_table <- table(predicted=prediction.vector_svm, correct = testdata$V61 )
+  score <- measurePrecisionRecall(prediction.vector_svm,testdata$V61,data = "sonar")
+  svm_models <- rbind(svm_models,c(i,score$values))
+  colnames(svm_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+}
+print(svm_models)
+```
+
+
+trainng Random Forest model 
+
+
+```{r,warning=FALSE}
+library("randomForest", lib.loc="/Library/Frameworks/R.framework/Versions/3.2/Resources/library")
+#random forest
+folds <-createFolds(raw.data$V61, k = 10)
+rf_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data[-fold,]
+  testdata <- raw.data[fold,]
+  rf_model <- randomForest(V61 ~ ., data=traindata, importance=TRUE,proximity=TRUE)
+  prediction.vector_rf <- predict(rf_model, testdata)
+  rf_table <- table(predicted=prediction.vector_rf, correct = testdata$V61 )
+  score <- measurePrecisionRecall(prediction.vector_rf,testdata$V61,data = "sonar")
+  rf_models <- rbind(rf_models,c(i,score$values))
+  colnames(rf_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+}
+print(rf_models)
+```
+
+trainng naive bayes model 
+
+```{r}
+#nb with C.V.
+folds <-createFolds(raw.data$V61, k = 10)
+nb_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data[-fold,]
+  testdata <- raw.data[fold,]
+  nb_model <- naiveBayes(V61 ~ ., data=traindata, importance=TRUE,proximity=TRUE)
+
+  prediction.vector_nb <- predict(nb_model, testdata)
+  nb_table <- table(predicted=prediction.vector_nb, correct = testdata$V61 )
+  score <- measurePrecisionRecall(prediction.vector_nb,testdata$V61,data = "sonar")
+  nb_models <- rbind(nb_models,c(i,score$values))
+  colnames(nb_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+}
+print(nb_models)
+```
+
+artificial neural network :
+
+```{r}
+#ANN
+library(nnet)
+folds <-createFolds(raw.data$V61, k = 10)
+ann_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data[-fold,]
+  testdata <- raw.data[fold,]
+  ann_model <- nnet(V61 ~ ., data=traindata, size=5,trace=F);
+
+  prediction.vector_ann <- predict(ann_model, testdata ,type = "class")
+  ann_table <- table(predicted=prediction.vector_ann, correct = testdata$V61 )
+  score <- measurePrecisionRecall(prediction.vector_ann,testdata$V61,data = "sonar")
+  ann_models <- rbind(ann_models,c(i,score$values))
+  colnames(ann_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+}
+print(ann_models)
+
+
+score.mat = c(1:5)
+score.mat <- rbind(score.mat,c("Model","Average Accuracy","Average Precision","Average Recall","Average Fmeasure"))
+score.mat <- rbind(score.mat,c("C4.5",mean(c4.5_models$accuracy),mean(c4.5_models$precision),mean(c4.5_models$recall),mean(c4.5_models$fmeasure)))
+score.mat <- rbind(score.mat,c("C5",mean(c5_models$accuracy),mean(c5_models$precision),mean(c5_models$recall),mean(c5_models$fmeasure)))
+score.mat <- rbind(score.mat,c("SVM",mean(svm_models$accuracy),mean(svm_models$precision),mean(svm_models$recall),mean(svm_models$fmeasure)))
+score.mat <- rbind(score.mat,c("RF",mean(rf_models$accuracy),mean(rf_models$precision),mean(rf_models$recall),mean(rf_models$fmeasure)))
+score.mat <- rbind(score.mat,c("NB",mean(nb_models$accuracy),mean(nb_models$precision),mean(nb_models$recall),mean(nb_models$fmeasure)))
+score.mat <- rbind(score.mat,c("ANN",mean(ann_models$accuracy),mean(ann_models$precision),mean(ann_models$recall),mean(ann_models$fmeasure)))
+```
+ 
+bagging and boosting :
+
+
+```{r}
+library("adabag", lib.loc="/Library/Frameworks/R.framework/Versions/3.2/Resources/library")
+bagging = bagging.cv(V61 ~ ., v=10, data=raw.data, mfinal=10)
+
+
+ cm = bagging$confusion
+ accuracy = sum(diag(cm)) / sum(cm) 
+ precision = diag(cm) / apply(cm, 2, sum)  
+ recall = diag(cm) / diag(cm) 
+ f1 = 2 * precision * recall / (precision + recall) 
+score.mat <- rbind(score.mat,c("bagging",accuracy,precision,recall,f1))
+
+boosting = boosting.cv(V61 ~ ., v=10, data=raw.data, mfinal=10)
+
+
+
+ cm = boosting$confusion
+ accuracy = sum(diag(cm)) / sum(cm) 
+ precision = diag(cm) / apply(cm, 2, sum)  
+ recall = diag(cm) / diag(cm) 
+ f1 = 2 * precision * recall / (precision + recall) 
+score.mat <- rbind(score.mat,c("boosting",accuracy,precision,recall,f1))
+
+
+```
+And this the average readings of each model on the sonar dataset
+```{r}
+print(score.mat)
+```
+
+Also to know more about the nature of this dataset we will see the correlation matrix in heat image
+
+```{r}
+corm <- cor(Data)
+require(lattice)
+levelplot(corm)
+```
+
+And the distribution of the variables to see the outliers 
+
+```{r,warning=FALSE}
+#outliers
+library("reshape2", lib.loc="/Library/Frameworks/R.framework/Versions/3.2/Resources/library")
+e = melt(raw.data)
+bp <- ggplot(e, aes(x=variable, y=value,fill=V61)) + 
+  geom_boxplot()+
+  labs(title="data set",x="varbiles", y = "value")
+
+bp + theme_classic()
+```
+Test multiple algorithms on multiple datasets.
+Here we will run the same experiments but on different datasets
+first dataset is hepatitis
+However the data is full of NAs so we will fill them by the median value from the same column the Dna occurs
+also addin the names for the varibles dataset link (http://archive.ics.uci.edu/ml/datasets/Hepatitis)
+```{r,warning=FALSE}
+remove.nas=function(x){
+  x<-as.numeric(as.character(x)) #first convert each column into numeric if it is from factor
+  x[is.na(x)] =median(x, na.rm=TRUE) #convert the item with NA to median value from the column
+  x #display the column
+}
+raw.data.h <- read.csv(file = '/Users/mina/Desktop/hepatitis.data.txt',header = FALSE)
+names(raw.data.h ) = c("Class","AGE","SEX","STEROID","ANTIVIRALS","FATIGUE","MALAISE","ANOREXIA","LIVER BIG","LIVER FIRM","SPLEEN PALPABLE","SPIDERS","ASCITES","VARICES","BILIRUBIN","ALK PHOSPHATE","SGOT","ALBUMIN","PROTIME","HISTOLOGY")
+raw.data.h[raw.data.h == "?"] <- NA
+raw.data.h <- data.frame(apply(raw.data.h,2,remove.nas))
+raw.data.h$Class <- as.factor(raw.data.h$Class)
+Data = raw.data.h[,2:20]
+output = raw.data.h[,1]
+```
+
+Also to see the outliers and the correlation matrix 
+
+```{r,results="hide"}
+corm <- cor(Data)
+require(lattice)
+levelplot(corm)
+```
+
+```{r,results="hide"}
+e = melt(raw.data.h)
+bp <- ggplot(e, aes(x=variable, y=value,fill=Class)) + 
+  geom_boxplot()+
+  labs(title="data set",x="varbiles", y = "value")
+
+bp + theme_classic()
+```
+
+running the experiments on the hepatitis dataset and saving the score in matrix:  
+
+```{r,results="hide"}
+
+#c4.5 with C.V.
+folds <-createFolds(raw.data.h$Class, k = 10)
+c4.5_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data.h[-fold,]
+  testdata <- raw.data.h[fold,]
+  c4.5_model <- J48(Class ~ ., data = traindata) 
+  prediction.vector_c4.5 <- predict(c4.5_model, testdata)
+  c4.5_table <- table(predicted=prediction.vector_c4.5, correct = testdata$Class )
+  score <- measurePrecisionRecall(prediction.vector_c4.5,testdata$Class,data = "hepatitis")
+  c4.5_models <- rbind(c4.5_models,c(i,score$values))
+  colnames(c4.5_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+  
+}
+
+
+
+
+#c5 with C.V.
+folds <-createFolds(raw.data.h$Class, k = 10)
+c5_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data.h[-fold,]
+  testdata <- raw.data.h[fold,]
+  c5_model <- C5.0(x = traindata, y = traindata$Class)
+  prediction.vector_c5 <- predict(c5_model, testdata)
+  c5_table <- table(predicted=prediction.vector_c5, correct = testdata$Class )
+  score <- measurePrecisionRecall(prediction.vector_c5,testdata$Class,data = "hepatitis")
+  c5_models <- rbind(c5_models,c(i,score$values))
+  colnames(c5_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+  
+}
+
+
+
+#SVM with C.V.
+folds <-createFolds(raw.data.h$Class, k = 10)
+svm_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data.h[-fold,]
+  testdata <- raw.data.h[fold,]
+  svm_model <- svm(Class ~ ., data = traindata) 
+  prediction.vector_svm <- predict(svm_model, testdata)
+  svm_table <- table(predicted=prediction.vector_svm, correct = testdata$Class )
+  score <- measurePrecisionRecall(prediction.vector_svm,testdata$Class,data = "hepatitis")
+  svm_models <- rbind(svm_models,c(i,score$values))
+  colnames(svm_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+  
+}
+
+#random forest
+folds <-createFolds(raw.data.h$Class, k = 10)
+rf_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data.h[-fold,]
+  testdata <- raw.data.h[fold,]
+  rf_model <- randomForest(Class ~ ., data=traindata, importance=TRUE,proximity=TRUE)
+  prediction.vector_rf <- predict(rf_model, testdata)
+  rf_table <- table(predicted=prediction.vector_rf, correct = testdata$Class )
+  score <- measurePrecisionRecall(prediction.vector_rf,testdata$Class,data = "hepatitis")
+  rf_models <- rbind(rf_models,c(i,score$values))
+  colnames(rf_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+}
+
+#nb with C.V.
+folds <-createFolds(raw.data.h$Class, k = 10)
+nb_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data.h[-fold,]
+  testdata <- raw.data.h[fold,]
+  nb_model <- naiveBayes(Class ~ ., data=traindata, importance=TRUE,proximity=TRUE)
+
+  prediction.vector_nb <- predict(nb_model, testdata)
+  nb_table <- table(predicted=prediction.vector_nb, correct = testdata$Class )
+  score <- measurePrecisionRecall(prediction.vector_nb,testdata$Class,data = "hepatitis")
+  nb_models <- rbind(nb_models,c(i,score$values))
+  colnames(nb_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+  nb_models
+}
+
+#ANN
+folds <-createFolds(raw.data.h$Class, k = 10)
+ann_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data.h[-fold,]
+  testdata <- raw.data.h[fold,]
+  ann_model <- nnet(Class ~ ., data=traindata, size=5,trace=F);
+
+  prediction.vector_ann <- predict(ann_model, testdata ,type = "class")
+  ann_table <- table(predicted=prediction.vector_ann, correct = testdata$Class )
+  score <- measurePrecisionRecall(prediction.vector_ann,testdata$Class,data = "hepatitis")
+  ann_models <- rbind(ann_models,c(i,score$values))
+  colnames(ann_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+}
+
+bagging = bagging.cv(Class ~ ., v=10, data=raw.data.h, mfinal=10)
+bagging.precision = bagging$confusion
+boosting = boosting.cv(Class ~ ., v=10, data=raw.data.h, mfinal=10)
+
+ cm = bagging$confusion
+ accuracy = sum(diag(cm)) / sum(cm) 
+ precision = diag(cm) / apply(cm, 2, sum)  
+ recall = diag(cm) / diag(cm) 
+ f1 = 2 * precision * recall / (precision + recall) 
+
+```
+
+Here is the scores of the tests 
+
+```{r}
+print(c4.5_models)
+print(c5_models)
+print(svm_models)
+print(rf_models)
+print(nb_models)
+print(ann_models)
+
+cm = bagging$confusion
+accuracy = sum(diag(cm)) / sum(cm) 
+precision = cm[1,1] / (cm[1,1]+cm[1,2])
+recall = cm[1,1] / (cm[1,1]+cm[2,1])
+f1 = 2 * precision * recall / (precision + recall) 
+print(accuracy)
+print(precision)
+print(recall)
+print(f1)
+
+score.mat = c(1:5)
+score.mat <- rbind(score.mat,c("Model","Average Accuracy","Average Precision","Average Recall","Average Fmeasure"))
+score.mat <- rbind(score.mat,c("C4.5",mean(c4.5_models$accuracy),mean(c4.5_models$precision),mean(c4.5_models$recall),mean(c4.5_models$fmeasure)))
+score.mat <- rbind(score.mat,c("C5",mean(c5_models$accuracy),mean(c5_models$precision),mean(c5_models$recall),mean(c5_models$fmeasure)))
+score.mat <- rbind(score.mat,c("SVM",mean(svm_models$accuracy),mean(svm_models$precision),mean(svm_models$recall),mean(svm_models$fmeasure)))
+score.mat <- rbind(score.mat,c("RF",mean(rf_models$accuracy),mean(rf_models$precision),mean(rf_models$recall),mean(rf_models$fmeasure)))
+score.mat <- rbind(score.mat,c("NB",mean(nb_models$accuracy),mean(nb_models$precision),mean(nb_models$recall),mean(nb_models$fmeasure)))
+score.mat <- rbind(score.mat,c("ANN",mean(ann_models$accuracy),mean(ann_models$precision),mean(ann_models$recall),mean(ann_models$fmeasure)))
+score.mat <- rbind(score.mat,c("bagging",accuracy,precision,recall,f1))
+
+cm = boosting$confusion
+accuracy = sum(diag(cm)) / sum(cm) 
+precision = cm[1,1] / (cm[1,1]+cm[1,2])
+recall = cm[1,1] / (cm[1,1]+cm[2,1])
+f1 = 2 * precision * recall / (precision + recall) 
+print(accuracy)
+print(precision)
+print(recall)
+print(f1)
+
+score.mat <- rbind(score.mat,c("boosting",accuracy,precision,recall,f1))
+print(score.mat)
+```
+
+the second dataset is diabetes 
+link for the dataset (http://archive.ics.uci.edu/ml/datasets/Pima+Indians+Diabetes)
+```{r,warning=FALSE}
+raw.data.d <- read.csv(file = '/Users/mina/Desktop/pima-indians-diabetes.data.txt',header = FALSE)
+names(raw.data.d) = c("Number.of.times.pregnant","Plasma.glucose.concentration","Diastolic.blood.pressure","Triceps.skin.fold.thickness","two.Hour.serum.insulin","Body.mass.index","Diabetes.pedigree.function","Age","Class")
+raw.data.d$Class <- as.factor(raw.data.d$Class)
+Data = raw.data.d[,1:8]
+output = raw.data.d[,9]
+```
+
+Also to see the outliers and the correlation matrix 
+
+```{r,results="hide"}
+corm <- cor(Data)
+require(lattice)
+levelplot(corm)
+```
+
+```{r,results="hide"}
+e = melt(raw.data.d)
+bp <- ggplot(e, aes(x=variable, y=value,fill=Class)) + 
+  geom_boxplot()+
+  labs(title="data set",x="varbiles", y = "value")
+
+bp + theme_classic()
+```
+running the experiments on the hepatitis dataset and saving the score in matrix:  
+
+```{r,warning=FALSE}
+#c4.5 with C.V.
+folds <-createFolds(raw.data.d$Class, k = 10)
+c4.5_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data.d[-fold,]
+  testdata <- raw.data.d[fold,]
+  testdata$Class <- as.integer(testdata$Class)
+  c4.5_model <- J48(Class ~ ., data = traindata) 
+  prediction.vector_c4.5 <- predict(c4.5_model, testdata)
+  prediction.vector_c4.5 <- as.integer(prediction.vector_c4.5)
+  c4.5_table <- table(predicted=prediction.vector_c4.5, correct = testdata$Class )
+  score <- measurePrecisionRecall(prediction.vector_c4.5,testdata$Class,data = "hepatitis")
+  c4.5_models <- rbind(c4.5_models,c(i,score$values))
+  colnames(c4.5_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+}
+
+#SVM with C.V.
+folds <-createFolds(raw.data.d$Class, k = 10)
+svm_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data.d[-fold,]
+  testdata <- raw.data.d[fold,]
+  testdata$Class <- as.integer(testdata$Class)
+  svm_model <- svm(Class ~ ., data = traindata) 
+  prediction.vector_svm <- predict(svm_model, testdata)
+  prediction.vector_svm <- as.integer(prediction.vector_svm)
+  svm_table <- table(predicted=prediction.vector_svm, correct = testdata$Class )
+  score <- measurePrecisionRecall(prediction.vector_svm,testdata$Class,data = "hepatitis")
+  svm_models <- rbind(svm_models,c(i,score$values))
+  colnames(svm_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+}
+
+#random forest
+folds <-createFolds(raw.data.d$Class, k = 10)
+rf_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data.d[-fold,]
+  testdata <- raw.data.d[fold,]
+  testdata$Class <- as.integer(testdata$Class)
+  rf_model <- randomForest(Class ~ ., data=traindata, importance=TRUE,proximity=TRUE)
+  prediction.vector_rf <- predict(rf_model, testdata)
+  prediction.vector_rf <- as.integer(prediction.vector_rf)
+  rf_table <- table(predicted=prediction.vector_rf, correct = testdata$Class )
+  score <- measurePrecisionRecall(prediction.vector_rf,testdata$Class,data = "hepatitis")
+  rf_models <- rbind(rf_models,c(i,score$values))
+  colnames(rf_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+  rf_models
+}
+
+#nb with C.V.
+folds <-createFolds(raw.data.d$Class, k = 10)
+nb_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data.d[-fold,]
+  testdata <- raw.data.d[fold,]
+  testdata$Class <- as.integer(testdata$Class)
+  nb_model <- naiveBayes(Class ~ ., data=traindata, importance=TRUE,proximity=TRUE)
+  prediction.vector_nb <- predict(nb_model, testdata)
+  prediction.vector_nb <- as.integer(prediction.vector_nb)
+  nb_table <- table(predicted=prediction.vector_nb, correct = testdata$Class )
+  score <- measurePrecisionRecall(prediction.vector_nb,testdata$Class,data = "hepatitis")
+  nb_models <- rbind(nb_models,c(i,score$values))
+  colnames(nb_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+  
+}
+
+#ANN
+folds <-createFolds(raw.data.d$Class, k = 10)
+ann_models <- data.frame(model.number = numeric(0), precision = numeric(0), recall = numeric(0),fmeasure = numeric(0))
+for (i in 1:10) {
+  fold <- as.numeric( unlist(folds[i]))
+  traindata <- raw.data.d[-fold,]
+  testdata <- raw.data.d[fold,]
+  testdata$Class <- as.integer(testdata$Class)
+  ann_model <- nnet(Class ~ ., data=traindata, size=5,trace=F);
+  prediction.vector_ann <- predict(ann_model, testdata ,type = "class")
+  prediction.vector_ann <- gsub("1", 2, prediction.vector_ann)
+  prediction.vector_ann <- gsub("0", 1, prediction.vector_ann)
+  prediction.vector_ann <- as.integer(prediction.vector_ann)
+  ann_table <- table(predicted=prediction.vector_ann, correct = testdata$Class )
+  score <- measurePrecisionRecall(prediction.vector_ann,testdata$Class,data = "hepatitis")
+  ann_models <- rbind(ann_models,c(i,score$values))
+  colnames(ann_models) <-c("model.number","accuracy","precision","recall","fmeasure")
+}
+
+bagging = bagging.cv(Class ~ ., v=10, data=raw.data.d, mfinal=10)
+bagging.precision = bagging$confusion
+boosting = boosting.cv(Class ~ ., v=10, data=raw.data.d, mfinal=10)
+
+ cm = bagging$confusion
+ accuracy = sum(diag(cm)) / sum(cm) 
+ precision = diag(cm) / apply(cm, 2, sum)  
+ recall = diag(cm) / diag(cm) 
+ f1 = 2 * precision * recall / (precision + recall) 
+
+```
+Here is the scores of the tests 
+
+```{r}
+print(c4.5_models)
+print(svm_models)
+print(rf_models)
+print(nb_models)
+print(ann_models)
+
+cm = bagging$confusion
+accuracy = sum(diag(cm)) / sum(cm) 
+precision = cm[1,1] / (cm[1,1]+cm[1,2])
+recall = cm[1,1] / (cm[1,1]+cm[2,1])
+f1 = 2 * precision * recall / (precision + recall) 
+print(accuracy)
+print(precision)
+print(recall)
+print(f1)
+
+score.mat = c(1:5)
+score.mat <- rbind(score.mat,c("Model","Average Accuracy","Average Precision","Average Recall","Average Fmeasure"))
+score.mat <- rbind(score.mat,c("C4.5",mean(c4.5_models$accuracy),mean(c4.5_models$precision),mean(c4.5_models$recall),mean(c4.5_models$fmeasure)))
+score.mat <- rbind(score.mat,c("SVM",mean(svm_models$accuracy),mean(svm_models$precision),mean(svm_models$recall),mean(svm_models$fmeasure)))
+score.mat <- rbind(score.mat,c("RF",mean(rf_models$accuracy),mean(rf_models$precision),mean(rf_models$recall),mean(rf_models$fmeasure)))
+score.mat <- rbind(score.mat,c("NB",mean(nb_models$accuracy),mean(nb_models$precision),mean(nb_models$recall),mean(nb_models$fmeasure)))
+score.mat <- rbind(score.mat,c("ANN",mean(ann_models$accuracy),mean(ann_models$precision),mean(ann_models$recall),mean(ann_models$fmeasure)))
+score.mat <- rbind(score.mat,c("bagging",accuracy,precision,recall,f1))
+
+  
+cm = boosting$confusion
+accuracy = sum(diag(cm)) / sum(cm) 
+precision = cm[1,1] / (cm[1,1]+cm[1,2])
+recall = cm[1,1] / (cm[1,1]+cm[2,1])
+f1 = 2 * precision * recall / (precision + recall) 
+print(accuracy)
+print(precision)
+print(recall)
+print(f1)
+
+
+
+score.mat <- rbind(score.mat,c("boosting",accuracy,precision,recall,f1))
+print(score.mat)
+
+```
